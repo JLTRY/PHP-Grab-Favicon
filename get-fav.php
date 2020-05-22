@@ -29,6 +29,7 @@ $grap_favicon = array(
 'DIR' => './',   // Local Dir the copy of the Favicon should be saved
 'TRY' => true,   // Try to get the Favicon frome the page (true) or only use the APIs (false)
 'DEV' => null,   // Give all Debug-Messages ('debug') or only make the work (null)
+'TESTS' => true ..// add tests
 );
 
 echo '<img src="'.grap_favicon($grap_favicon).'">';
@@ -42,120 +43,85 @@ Infos about Favicon
 -------------------
 https://github.com/audreyr/favicon-cheat-sheet
 
-###### Copyright 2019 Igor Gaffling
+###### Copyright 2019-2020 Igor Gaffling
 
 */ 
 
-$testURLs = array(
-  'http://aws.amazon.com',
-  'http://www.apple.com',
-  'http://www.dribbble.com',
-  'http://www.github.com',
-  'http://www.intercom.com',
-  'http://www.indiehackers.com',
-  'http://www.medium.com',
-  'http://www.mailchimp.com',
-  'http://www.netflix.com',
-  'http://www.producthunt.com',
-  'http://www.reddit.com',
-  'http://www.slack.com',
-  'http://www.soundcloud.com',
-  'http://www.stackoverflow.com',
-  'http://www.techcrunch.com',
-  'http://www.trello.com',
-  'http://www.vimeo.com',
-  'https://www.whatsapp.com/',
-  'https://www.gaffling.com/',
-);
-
-foreach ($testURLs as $url) {
-  $grap_favicon = array(
-    'URL' => $url,   // URL of the Page we like to get the Favicon from
-    'SAVE'=> true,   // Save Favicon copy local (true) or return only favicon url (false)
-    'DIR' => './',   // Local Dir the copy of the Favicon should be saved
-    'TRY' => true,   // Try to get the Favicon frome the page (true) or only use the APIs (false)
-    'DEV' => null,   // Give all Debug-Messages ('debug') or only make the work (null)
-  );
-  $favicons[] = grap_favicon($grap_favicon);
-}
-foreach ($favicons as $favicon) {
-  echo '<img title="'.$favicon.'" style="width:32px;padding-right:32px;" src="'.$favicon.'">';
-}
-echo '<br><br><tt>Runtime: '.round((microtime(true)-$_SERVER["REQUEST_TIME_FLOAT"]),2).' Sec.';
-
 function grap_favicon( $options=array() ) {
+  
+	// avoid script runtime timeout
+	$max_execution_time = ini_get("max_execution_time");
+	set_time_limit(0); // 0 = no timelimit
 
-  // Ini Vars
-  $url       = (isset($options['URL']))?$options['URL']:'gaffling.com';
-  $save      = (isset($options['SAVE']))?$options['SAVE']:true;
-  $directory = (isset($options['DIR']))?$options['DIR']:'./';
-  $trySelf   = (isset($options['TRY']))?$options['TRY']:true;
-  $DEBUG     = (isset($options['DEV']))?$options['DEV']:null;
+	// Ini Vars
+	$url       = (isset($options['URL']))?$options['URL']:'gaffling.com';
+	$save      = (isset($options['SAVE']))?$options['SAVE']:true;
+	$directory = (isset($options['DIR']))?$options['DIR']:'./';
+	$trySelf   = (isset($options['TRY']))?$options['TRY']:true;
+	$DEBUG     = (isset($options['DEV']))?$options['DEV']:null;
+	$TESTS     = (isset($options['TESTS']))?$options['TESTS']:false;
 
   // URL to lower case
 	$url = strtolower($url);
 
 	// Get the Domain from the URL
-  $domain = parse_url($url, PHP_URL_HOST);
-
-  // Check Domain
-  $domainParts = explode('.', $domain);
-  if(count($domainParts) == 3 and $domainParts[0]!='www') {
-    // With Subdomain (if not www)
-    $domain = $domainParts[0].'.'.
-              $domainParts[count($domainParts)-2].'.'.$domainParts[count($domainParts)-1];
-  } else if (count($domainParts) >= 2) {
-    // Without Subdomain
-		$domain = $domainParts[count($domainParts)-2].'.'.$domainParts[count($domainParts)-1];
+	$domain = parse_url($url, PHP_URL_HOST);
+	$url_scheme = parse_url($url, PHP_URL_SCHEME);
+	// Check Domain
+	$domainParts = explode('.', $domain);
+	if(count($domainParts) == 3 and $domainParts[0]!='www') {
+		// With Subdomain (if not www)
+		$domain = $domainParts[0].'.'.
+			  $domainParts[count($domainParts)-2].'.'.$domainParts[count($domainParts)-1];
+	} else if (count($domainParts) >= 2) {
+		// Without Subdomain
+		$domain =  join('.', array_filter($domainParts, function($v) { return $v != "www"; }));
+		//$domainParts[count($domainParts)-2].'.'.$domainParts[count($domainParts)-1];
 	} else {
-	  // Without http(s)
-	  $domain = $url;
+		// Without http(s)
+		$domain = $url;
 	}
 
 	// FOR DEBUG ONLY
 	if($DEBUG=='debug')print('<b style="color:red;">Domain</b> #'.@$domain.'#<br>');
+	if($DEBUG=='debug')print('<b style="color:red;">Domain</b> #'. count($domainParts) . '#<br>');
 
 	// Make Path & Filename
 	$filePath = preg_replace('#\/\/#', '/', $directory.'/'.$domain.'.png');
+	// change save path & filename of icons ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 
 
 	// If Favicon not already exists local
-  if ( !file_exists($filePath) or @filesize($filePath)==0 ) {
+	if ( !file_exists($filePath) or @filesize($filePath)==0  or $save != true) {
+		// If $trySelf == TRUE ONLY USE APIs
+		if ( isset($trySelf) and $trySelf == TRUE ) {  
+		// Load Page
+		$html = load($url, $DEBUG);
+		// Find Favicon with RegEx
+		$regExPattern = '/((<link[^>]+rel=.(icon|shortcut icon|alternate icon)[^>]+>))/i';
+		if ( @preg_match($regExPattern, $html, $matchTag) ) {
+		$regExPattern = '/href=(\'|\")(.*?)\1/i';
+		if ( isset($matchTag[1]) and @preg_match($regExPattern, $matchTag[1], $matchUrl)) {
+			if ( isset($matchUrl[2]) ) {
+			
+				// Build Favicon Link
+				$favicon = rel2abs(trim($matchUrl[2]), $url_scheme .'://'.$domain.'/');
+			
+				// FOR DEBUG ONLY
+				if($DEBUG=='debug')print('<b style="color:red;">Match</b> #'.@$favicon.'#<br>');
+			}
+		}
+	}
+	// If there is no Match: Try if there is a Favicon in the Root of the Domain
+	if ( empty($favicon) ) { 
+		$favicon = $url_scheme .'://'.$domain.'/favicon.ico';
+		// Try to Load Favicon
+		if ( !@getimagesize($favicon) ) {
+		  unset($favicon);
+		}
+	}
 
-    // If $trySelf == TRUE ONLY USE APIs
-    if ( isset($trySelf) and $trySelf == TRUE ) {  
+	} // END If $trySelf == TRUE ONLY USE APIs
 
-      // Load Page
-      $html = load($url, $DEBUG);
-
-      // Find Favicon with RegEx
-      $regExPattern = '/((<link[^>]+rel=.(icon|shortcut icon|alternate icon)[^>]+>))/i';
-      if ( @preg_match($regExPattern, $html, $matchTag) ) {
-        $regExPattern = '/href=(\'|\")(.*?)\1/i';
-        if ( isset($matchTag[1]) and @preg_match($regExPattern, $matchTag[1], $matchUrl)) {
-          if ( isset($matchUrl[2]) ) {
-            
-            // Build Favicon Link
-            $favicon = rel2abs(trim($matchUrl[2]), 'http://'.$domain.'/');
-            
-          	// FOR DEBUG ONLY
-          	if($DEBUG=='debug')print('<b style="color:red;">Match</b> #'.@$favicon.'#<br>');
-
-          }
-        }
-      }
-      
-      // If there is no Match: Try if there is a Favicon in the Root of the Domain
-    	if ( empty($favicon) ) { 
-      	$favicon = 'http://'.$domain.'/favicon.ico';
-
-      	// Try to Load Favicon
-        if ( !@getimagesize($favicon) ) {
-          unset($favicon);
-        }
-    	}
-
-    } // END If $trySelf == TRUE ONLY USE APIs
-        
     // If nothink works: Get the Favicon from API
     if ( !isset($favicon) or empty($favicon) ) {
 
@@ -237,6 +203,9 @@ function grap_favicon( $options=array() ) {
 	  print('<b style="color:red;">Image</b> <img style="width:32px;" 
 	         src="data:image/png;base64,'.base64_encode($content).'"><hr size="1">');
   }
+	
+  // reset script runtime timeout
+  set_time_limit($max_execution_time); // set it back to the old value
 
   // Return Favicon Url
   return $filePath;
